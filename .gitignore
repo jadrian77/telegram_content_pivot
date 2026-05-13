@@ -1,0 +1,12 @@
+.vscode
+build
+dist
+__pycache__
+download
+.gitignore
+config.yaml
+.env
+*venv*
+telegram_content_pivot
+*.spec
+*.session*
