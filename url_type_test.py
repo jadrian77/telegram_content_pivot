@@ -33,9 +33,9 @@ async def url_test():
     ]
     try:
         for url in url_list:
-            print(f"test url= {url}")
+            print(f"start test url= {url}")
             await worker.url_handler(url, user_client, bot_client)
-            print("done.")
+            print(f"test url= {url} done.")
     except Exception as e:
         print(e)
 
