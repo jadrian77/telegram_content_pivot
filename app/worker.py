@@ -8,6 +8,7 @@ from telethon.tl.types import (
     MessageMediaPhoto,
 )
 import os
+import time
 from typing import Optional, Union
 
 
@@ -101,19 +102,55 @@ def get_media_type(message: Message) -> Optional[str]:
     return None
 
 
+async def _progress_callback(
+    current: int,
+    total: int,
+    start_now: int,
+    desc: str,
+    bot_client: TelegramClient,
+    progress_msg,
+    user_me,
+    file_num: int=None,
+    file_current: int=None,
+    files_total_size: int=None,
+    files_current_size: int=None,
+) -> None:
+
+    now_time = time.time()
+    status_text = desc
+    if file_num != None and file_current != None:
+        status_text += f" Files {file_current}/{file_num}"
+    if files_total_size != None and files_current_size != None:
+        status_text += "\nTotal bytes: {:.2%}".format(
+            (files_current_size + current) / files_total_size
+        )
+    status_text += "\nfile bytes: {:.2%}".format(current / total)
+
+    if round((now_time - start_now) % 7.00) == 0 or current == total:
+        await bot_client.edit_message(user_me.id, progress_msg, status_text)
+
+
 async def url_handler(
-    telegram_url: str, user_client: TelegramClient, bot_client: TelegramClient
+    telegram_url: str,
+    user_client: TelegramClient,
+    bot_client: TelegramClient,
+    user_message: Message = None,
 ):
     url_data = check_url_type(telegram_url)
+
+    user_me = await user_client.get_me()
+    progress_msg = await bot_client.send_message(
+        user_me.id, message="start processing...", reply_to=user_message
+    )
 
     msg_entity = await user_client.get_messages(
         url_data.channel_id, ids=url_data.message_id
     )
     caption = msg_entity.message
     msg_media = getattr(msg_entity, "media")
-    user_me = await user_client.get_me()
     if not msg_media:
-        await bot_client.send_message(user_me.id, caption)
+        await bot_client.send_message(user_me.id, caption, reply_to=user_message)
+        await bot_client.delete_messages(user_me.id, progress_msg)
         return
 
     messages = [msg_entity]
@@ -133,6 +170,7 @@ async def url_handler(
         if len(bot_read_msg_entitys) > 0:
             try:
                 await bot_client.forward_messages(user_me.id, bot_read_msg_entitys)
+                await bot_client.delete_messages(user_me.id, progress_msg)
                 return
             except:
                 pass
@@ -140,7 +178,15 @@ async def url_handler(
     files = []
     attributes = []
     voice = None
-    for message in messages:
+    start_now = time.time()
+    total_file_size = sum(
+        message.file.size
+        for message in messages
+        if message and getattr(message, "file")
+    )
+    current_file_size = 0
+    message_num = len(messages)
+    for idx, message in enumerate(messages):
 
         media_type = get_media_type(message)
         if not media_type:
@@ -169,26 +215,59 @@ async def url_handler(
                     title=title,
                 )
             )
-        files.append(await user_client.download_media(message))
+        files.append(
+            await user_client.download_media(
+                message,
+                progress_callback=lambda current, total: _progress_callback(
+                    current=current,
+                    total=total,
+                    start_now=start_now,
+                    desc="Downloading",
+                    bot_client=bot_client,
+                    progress_msg=progress_msg,
+                    user_me=user_me,
+                    file_num=message_num,
+                    file_current=idx,
+                    files_total_size=total_file_size,
+                    files_current_size=current_file_size,
+                ),
+            )
+        )
+        current_file_size += message.file.size if message and message.file else 0
         if media_type == "voice":
             voice = files[len(files) - 1]
             break
 
     if len(files) > 0:
+        start_now = time.time()
         wait_send_files = files
         if voice != None:
             wait_send_files = voice
         await bot_client.send_file(
-            user_me.id, wait_send_files, caption=caption, attributes=attributes
+            user_me.id,
+            wait_send_files,
+            caption=caption,
+            attributes=attributes,
+            reply_to=user_message,
+            progress_callback=lambda current, total: _progress_callback(
+                current=current,
+                total=total,
+                start_now=start_now,
+                desc="Uploading",
+                bot_client=bot_client,
+                progress_msg=progress_msg,
+                user_me=user_me,
+            ),
         )
         for file in files:
             os.remove(file)
+    await bot_client.delete_messages(user_me.id, progress_msg)
     print(f"done for url={telegram_url}")
 
 
 async def event_handler(event, user_client, bot_client):
     event_text = event.raw_text
     if is_telegram_url(event_text):
-        await url_handler(event_text, user_client, bot_client)
+        await url_handler(event_text, user_client, bot_client, event.message)
     else:
         raise Exception("not a telegram message url")
