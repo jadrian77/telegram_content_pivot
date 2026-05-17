@@ -110,10 +110,10 @@ async def _progress_callback(
     bot_client: TelegramClient,
     progress_msg,
     user_me,
-    file_num: int=None,
-    file_current: int=None,
-    files_total_size: int=None,
-    files_current_size: int=None,
+    file_num: int = None,
+    file_current: int = None,
+    files_total_size: int = None,
+    files_current_size: int = None,
 ) -> None:
 
     now_time = time.time()
@@ -143,6 +143,14 @@ async def url_handler(
         user_me.id, message="start processing...", reply_to=user_message
     )
 
+    if url_data.comment_id:
+        discussion_channel_entity, _ = await user_client._get_comment_data(
+            url_data.channel_id, url_data.message_id
+        )
+        url_data.channel_id, url_data.message_id = (
+            discussion_channel_entity.channel_id,
+            url_data.comment_id,
+        )
     msg_entity = await user_client.get_messages(
         url_data.channel_id, ids=url_data.message_id
     )
@@ -161,19 +169,19 @@ async def url_handler(
         raise Exception("not get any message.")
 
     if not url_data.is_protect:
-        bot_read_msg_entitys = await bot_client.get_messages(
-            url_data.channel_id, ids=list(msg.id for msg in messages if msg)
-        )
-        bot_read_msg_entitys = list(
-            msg_entitys for msg_entitys in bot_read_msg_entitys if msg_entitys
-        )
-        if len(bot_read_msg_entitys) > 0:
-            try:
+        try:
+            bot_read_msg_entitys = await bot_client.get_messages(
+                url_data.channel_id, ids=list(msg.id for msg in messages if msg)
+            )
+            bot_read_msg_entitys = list(
+                msg_entitys for msg_entitys in bot_read_msg_entitys if msg_entitys
+            )
+            if len(bot_read_msg_entitys) > 0:
                 await bot_client.forward_messages(user_me.id, bot_read_msg_entitys)
                 await bot_client.delete_messages(user_me.id, progress_msg)
                 return
-            except:
-                pass
+        except:
+            pass
 
     files = []
     attributes = []
